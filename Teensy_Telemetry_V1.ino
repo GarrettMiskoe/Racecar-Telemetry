@@ -29,7 +29,7 @@ unsigned long voltFallTime = 0;
 #define buttonPin 19
 #define buttonDelay 5000 // Time, in milleseconds, that the button press is remembered for
 //#define AVI1 20
-#define transmitPeriod 300 //Time, in milleseconds, between serial output data transmissions
+#define transmitPeriod 100 //Time, in milleseconds, between serial output data transmissions
 
 uint16_t TPS = 0; // *10
 uint16_t RPM = 0;
@@ -43,7 +43,7 @@ byte dutyCycle = 0;
 
 
 void setup() {
-  Serial1.begin(112500);
+  Serial1.begin(9600);
   digitalWrite(STBY, LOW); // Puts the CAN Transciever into Normal mode
   can.begin();
   can.setBaudRate(1000000);

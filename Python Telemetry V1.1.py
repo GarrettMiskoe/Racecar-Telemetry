@@ -1,4 +1,5 @@
 import serial
+import serial.tools.list_ports
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import threading
@@ -6,13 +7,12 @@ import time
 from PIL import Image
 
 # Program Constants
-serialBaudrate = 115200
-serialPort = 'COM10' # different for different computers, devices
-linelen = 20 # length of each line of data from the serial port, in bytes - used for verification
-dataRate = 4 # estimated rate of newlines recieved by the serial port, in Hertz. MUST BE AN INT
-dataPeriod = 1.0/dataRate # a portion of the period of the datarate, for the program to plt.pause - this way it will most likely be done with plt.pause and waiting when the next data line arrives
-displayPeriod = 30 # how long the time graphs are, data over this amount (in seconds) old is removed from memory
-listLength = displayPeriod * dataRate # fixed length lists for time respective data will be this long
+serialBaudrate = 9600
+serialPort = 'COM7' # different for different computers, devices. Program chooses an avaiable port if any are open
+linelen = 12 # length of each line of data from the serial port. This means there are 12 data points transmitting
+dataPeriod = 100 # data sending interval in milleseconds
+displayPeriod = 50 # how long the time graphs are, data over this amount (in seconds) old is removed from memory
+listLength = int(round(displayPeriod / (dataPeriod/1000), 0)) # fixed length lists for time respective data will be this long
 xlist = list(range(0,listLength, 1)) # list, 0-300
 zerolist = [0] * listLength # does the same as 'zeros(listlength)' in MATLAB
 fuelConstant = 0.00000114475 # the constant that converts milleseconds of injector time to gallons of fuel burned, found experimentally
@@ -21,7 +21,7 @@ mapBounds = [71.8325, 71.821111, 41.978333, 41.983333] # bounds of the map image
 
 # Set up GUI elements
 # Right hand side time-graphs
-fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, sharex=True, figsize=[10,10], animated=True) # animated=True tells matplotlib to only draw the artist (axes) when we explicitly tell it
+fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, sharex=True, figsize=[10,10], animated=True) # animated=True tells matplotlib to only draw the artist (axes) when we explicitly tell it (in FuncAnimation)
 plt.get_current_fig_manager().full_screen_toggle()
 plt.xticks([])
 fig.suptitle('Miskoe Motorsports Telemetry, Car #770')
@@ -31,10 +31,10 @@ ax3.set_ylabel('Air-Fuel Ratio ', rotation='horizontal', horizontalalignment='ri
 ax4.set_ylabel('Water Temp [°F] ', rotation='horizontal', horizontalalignment='right')
 ax5.set_ylabel('MAP [psi]  ', rotation='horizontal', horizontalalignment='right')
 
-ax1.set_xlim([0,displayPeriod]) # Time axis
+ax1.set_xlim([listLength-1, 0]) # Time axis
 ax1.set_ylim([0,7300]) # RPM
 ax2.set_ylim([0,100]) # TPS
-ax3.set_ylim([0,120]) # AFR
+ax3.set_ylim([0,25]) # AFR
 ax4.set_ylim([0,250]) # Water temp
 ax5.set_ylim([0,20]) # Manifold Air Pressure (absolute, psi)
 plt.get_current_fig_manager().full_screen_toggle()
@@ -46,18 +46,22 @@ line4, = ax4.plot(xlist, zerolist, 'r-')
 line5, = ax5.plot(xlist, zerolist, 'r-')
 
 # Bottom left table
-table = plt.table(cellColours=['1', '1', '1', '1', '1', '1', '1', '1', '1', '1'], cellLoc='right', rowLabels=['RPM', 'TPS', 'Fuel Burned [gal]', 'AFR', 'Water Temp [°F]', 'MAP [psi]', 'Duty Cycle', 'Voltage', 'Ignition Angle [°]', 'Engine Revs'], loc='left', bbox=[-0.8,0.1, 0.15, 2]) #cellText=None, ,
+table = plt.table(cellColours=['1', '1', '1', '1', '1', '1', '1', '1', '1', '1'], cellLoc='right', rowLabels=['RPM', 'TPS', 'Fuel Burned [gal]', 'AFR', 'Water Temp [°F]', 'MAP [psi]', 'Duty Cycle [%]', 'Voltage', 'Ignition Angle [°]', 'Engine Revs'], loc='left', bbox=[-0.7,0.1, 0.15, 2.5], animated=False)
+table.set_fontsize(20)
+
 
 # Box that flashes to alert the pit-lane that the ACK button has been pressed on the steering wheel
-buttonPatch = fig.add_axes(rect=[0.22, 0.05, 0.12, 0.15])
+buttonPatch = fig.add_axes(rect=[0.27, 0.05, 0.12, 0.15], animated=True)
 buttonPatch.set_facecolor('skyblue')
-buttonLabel = plt.text(0.5,0.5 ,'ACK Pressed!', horizontalalignment='center', verticalalignment='center', fontsize='xx-large')
+buttonLabel = plt.text(0.5,0.5 ,'ACK Pressed!', horizontalalignment='center', verticalalignment='center', fontsize='xx-large', animated=True)
 plt.xticks([])
 plt.yticks([])
+buttonPatch.set_visible(False)
+buttonLabel.set_visible(False)
 
 
 # Top left map, uses the mapBacground and mapBounds from the program constants above
-map = fig.add_axes(rect=[0.015,0.45,0.4,0.55])
+map = fig.add_axes(rect=[0.015,0.45,0.4,0.55], animated=True)
 map.set_xlim([mapBounds[0], mapBounds[1]])
 map.set_ylim([mapBounds[2], mapBounds[3]])
 mapBackground = Image.open(mapBackground)
@@ -67,7 +71,6 @@ plt.yticks([])
 
 fig.subplots_adjust(wspace=0.1, left=0.5, right=0.98, top=0.92, bottom=0.05)
 plt.pause(0.1)
-#background = fig.canvas.copy_from_bbox(fig.bbox) # copies the entire figure into a 'background' object
 
 # draw the animated artist (the figure)
 fig.draw_artist(ax1)
@@ -81,6 +84,12 @@ fig.canvas.blit(fig.bbox) # show the result to the screen
 class SerialPort:
     def __init__(self):
         self.ser = serial.Serial()
+
+        ports = serial.tools.list_ports.comports() # get a list of the available serial ports
+        if len(ports) == 1: # if there are any avaiable ports
+            self.ser.port = ports[0].device # choose the first available one (assumes only one COM port open)
+        else:
+            self.ser.port = serialPort # choose the default port if none are open
         self.open_serial_port()
         self.errorCount = 0 # gives each instnace an error counter
 
@@ -88,12 +97,10 @@ class SerialPort:
         try:
             if self.ser.is_open:
                 self.ser.close()
-            self.ser.port = serialPort
             self.ser.baudrate = int(serialBaudrate)
             self.ser.open()
         except serial.SerialException as e: # kinda janky but this part tries to reopen the serial port endlessly if it fails to open
             print(f"Error opening serial port: {e}")
-            #plt.pause(1)
             time.sleep(1)
             self.open_serial_port()
 
@@ -102,9 +109,7 @@ class SerialPort:
             try:
                 line = self.ser.readline().decode('utf-8').strip()
                 if line:
-                    if len(line) == linelen: # check to make sure the length of the line is correct, then pass it to the callback
-                        self.serial_callback(line)
-                        time.sleep(dataPeriod/2)
+                    self.serial_callback(line)
 
             except:
                 if self.ser.is_open:
@@ -122,28 +127,18 @@ class SerialPort:
         stringlist = newline.split(',') # the data line split into a list of strings
         datalist = [int(x) for x in stringlist] # a list of the data as integers, converted from strings in stringlist
 
-        try:  
-            dataObject.calculate_data(datalist) # big hitter, gives the datalist to the dataObject, then the calculation results are passed to update_plot
-                                                              # the * is required to 'unpack' the result of calculate_data, which is a tuple of lists. It unpacks and passes each list in the tuple as an individual argument
-        except Exception as e:
-            print('unknown error: %s' %str(e))
-
-
+        if len(datalist) == linelen:
+            dataObject.calculate_data(datalist)
+        else:
+            print('Error: Wrong Line Length!')
+        
+        
 class dataManager:
     def __init__(self):
-        # make fixed length lists for the parameters which are graphed with time, to store the 'historical' data
-        # lists contain all zeros, to start
-        self.RPMlist = [0] * listLength
-        self.TPSlist = [0.0] * listLength
-        self.AFRlist = [0.0] * listLength
-        self.WaterTemplist = [0.0] * listLength
-        #self.steerPoslist = [0] * listLength
-        self.MAPlist = [0.0] * listLength
-
         self.total = 0 # initalize all single/current data points
-        self.RPM = 0
+        self.RPM = 4321
         self.AFR = 0
-        self.TPS = 0
+        self.TPS = 12
         self.WaterTemp = 0
         self.voltage = 0
         self.MAP = 0
@@ -153,8 +148,18 @@ class dataManager:
         self.voltageFlag = False
         self.buttonState = False
 
+        # make fixed length lists for the parameters which are graphed with time, to store the 'historical' data
+        # lists contain all zeros, to start
+        self.RPMlist = [self.RPM] * listLength
+        self.TPSlist = [self.TPS] * listLength
+        self.AFRlist = [self.AFR] * listLength
+        self.WaterTemplist = [self.WaterTemp] * listLength
+        #self.steerPoslist = [0] * listLength
+        self.MAPlist = [self.MAP] * listLength
+
 
     def calculate_data(self, newdata): # this calculates and stores the data in individual lists, each with the same length
+
         self.total = newdata[0] # total fuel injector open time, in milleseconds
         self.RPM = newdata[1]
         self.TPS = newdata[2]/10.0
@@ -171,8 +176,8 @@ class dataManager:
 
         # Conversions and calculations
         self.WaterTemp = self.WaterTemp*9/5 + 32 # convert Celsius to Fahrenheit
-        self.MAP = self.MAP*0.14504 # convert kPa to psi (all absolute pressure)
-        self.total = self.total*fuelConstant # converts milleseconds of injector open time to fuel burned in [gallons]
+        self.MAP = round(self.MAP*0.14504, 1) # convert kPa to psi (all absolute pressure) and round to 1 decimal place
+        self.total = round(self.total*fuelConstant, 3) # converts milleseconds of injector open time to fuel burned in [gallons] and rounds to 3 decimal places
                             #   ^ this constant is tuned for the car, as we don't know the exact flowrate of the injectors in their dynamic enviornment
                             #     (experimentally tuned)
 
@@ -221,14 +226,14 @@ class Visualization:
         if dataObject.buttonState == 1:
             if self.ACKflag == 0:
                 buttonPatch.set_visible(True)
-                buttonPatch.set_visible(True)
+                buttonLabel.set_visible(True)
                 self.ACKflag = 1
             else:
                 buttonPatch.set_visible(False)
-                buttonPatch.set_visible(False)
+                buttonLabel.set_visible(False)
                 self.ACKflag = 0
 
-        return line1, line2, line3, line4, line5, table, map, buttonPatch, buttonLabel
+        return line1, line2, line3, line4, line5, map, buttonPatch, buttonLabel
 
 def on_close(event):
     print('closed figure!')
@@ -240,15 +245,14 @@ fig.canvas.mpl_connect('close_event', on_close)
 # Create an instance of the dataManager class, this holds all the data
 dataObject = dataManager()
 
-# Create an instance of the SerialPort class. This calls the __init__ of the SerialPort class and lets things do their thing
+# Create an instance of the SerialPort class, this manages incoming data
 serial_port = SerialPort()
 if serial_port.ser.is_open:
     serial_thread = threading.Thread(target=serial_port.serial_reader)
     serial_thread.daemon = True
     serial_thread.start()
-    #serial_port.serial_reader() # this method contains the main callback loop, which is called if f  the serial port is open
 
 # Create an instance of the Visualization class, and pass it to the animation loop
 vis = Visualization()
-ani = FuncAnimation(fig, vis.update_plot, interval=(1000*dataPeriod), save_count=listLength, blit=False)
+ani = FuncAnimation(fig, vis.update_plot, interval=dataPeriod, save_count=listLength, blit=True)
 plt.show()
